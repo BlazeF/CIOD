@@ -110,14 +110,18 @@ def first_top1(record: dict[str, Any], model: str, output_key: str, label_key: s
     return str(best[label_key]), float(best["probability"])
 
 
-def summarize(semantic: list[str], fine: list[str]) -> dict[str, Any]:
+def summarize(
+    semantic: list[str], fine: list[str], semantic_target: str, fine_target: str
+) -> dict[str, Any]:
     return {
         "semantic_top1_counts": dict(Counter(semantic).most_common()),
         "fine_top1_counts": dict(Counter(fine).most_common()),
         "semantic_switches": count_switches(semantic),
         "fine_switches": count_switches(fine),
-        "semantic_news_frames": semantic.count("News"),
-        "fine_news_channel_frames": fine.count("News Channel-News"),
+        "semantic_target": semantic_target,
+        "semantic_target_frames": semantic.count(semantic_target),
+        "fine_target": fine_target,
+        "fine_target_frames": fine.count(fine_target),
     }
 
 
@@ -125,16 +129,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, default=HERE / "predictions.json")
     parser.add_argument("--model", default="mobilenet_v3_large")
+    parser.add_argument("--semantic-target", default="News")
+    parser.add_argument("--fine-target", default="News Channel-News")
     parser.add_argument("--output-csv", type=Path, default=HERE / "history_feedback_comparison.csv")
     parser.add_argument("--output-summary", type=Path, default=HERE / "history_feedback_summary.json")
     parser.add_argument("--window", type=int, default=5, help="Number of prior predictions for majority vote")
-    parser.add_argument("--news-enter-confidence", type=float, default=0.70)
-    parser.add_argument("--news-enter-run", type=int, default=2)
+    parser.add_argument("--target-enter-confidence", type=float, default=0.70)
+    parser.add_argument("--target-enter-run", type=int, default=2)
     parser.add_argument("--other-exit-confidence", type=float, default=0.80)
     parser.add_argument("--other-exit-run", type=int, default=3)
     args = parser.parse_args()
 
-    if args.window < 1 or args.news_enter_run < 1 or args.other_exit_run < 1:
+    if args.window < 1 or args.target_enter_run < 1 or args.other_exit_run < 1:
         parser.error("window and run lengths must be positive")
 
     records = json.loads(args.input.read_text(encoding="utf-8"))
@@ -155,8 +161,18 @@ def main() -> None:
     latch_semantic = prior_confidence_latch(
         semantic_raw,
         semantic_conf,
-        enter_threshold=args.news_enter_confidence,
-        enter_run=args.news_enter_run,
+        target=args.semantic_target,
+        enter_threshold=args.target_enter_confidence,
+        enter_run=args.target_enter_run,
+        exit_threshold=args.other_exit_confidence,
+        exit_run=args.other_exit_run,
+    )
+    latch_fine = prior_confidence_latch(
+        fine_raw,
+        fine_conf,
+        target=args.fine_target,
+        enter_threshold=args.target_enter_confidence,
+        enter_run=args.target_enter_run,
         exit_threshold=args.other_exit_confidence,
         exit_run=args.other_exit_run,
     )
@@ -165,20 +181,27 @@ def main() -> None:
         "raw": (semantic_raw, fine_raw),
         "previous_frame_hold": (previous_hold_semantic, previous_hold_fine),
         "previous_prior_window_majority": (majority_semantic, majority_fine),
-        "news_confidence_latch": (latch_semantic, majority_fine),
+        "semantic_target_confidence_latch": (latch_semantic, majority_fine),
+        "fine_target_confidence_latch": (majority_semantic, latch_fine),
+        "semantic_and_fine_target_latches": (latch_semantic, latch_fine),
     }
     summary = {
         "model": args.model,
+        "semantic_target": args.semantic_target,
+        "fine_target": args.fine_target,
         "frame_count": len(records),
         "causal": True,
         "method_settings": {
             "majority_window_prior_frames": args.window,
-            "news_enter_confidence": args.news_enter_confidence,
-            "news_enter_consecutive_prior_frames": args.news_enter_run,
+            "target_enter_confidence": args.target_enter_confidence,
+            "target_enter_consecutive_prior_frames": args.target_enter_run,
             "other_exit_confidence": args.other_exit_confidence,
             "other_exit_consecutive_same_other_class_prior_frames": args.other_exit_run,
         },
-        "methods": {name: summarize(*pair) for name, pair in methods.items()},
+        "methods": {
+            name: summarize(*pair, args.semantic_target, args.fine_target)
+            for name, pair in methods.items()
+        },
         "limitation": "Video-level labels do not establish frame-level accuracy. Counts and switches measure output distribution/stability, not accuracy, unless frame labels are annotated.",
     }
 
@@ -188,15 +211,16 @@ def main() -> None:
         writer = csv.writer(file)
         writer.writerow([
             "frame", "timestamp_seconds", "model", "raw_semantic", "raw_semantic_confidence",
-            "previous_raw_semantic", "prior_majority_semantic", "news_latch_semantic",
+            "previous_raw_semantic", "prior_majority_semantic", "semantic_target_latch",
             "raw_fine", "raw_fine_confidence", "previous_raw_fine", "prior_majority_fine",
+            "fine_target_latch",
         ])
         for index, record in enumerate(records):
             writer.writerow([
                 record.get("frame", index + 1), record.get("timestamp_seconds", ""), args.model,
                 semantic_raw[index], semantic_conf[index], previous_hold_semantic[index],
                 majority_semantic[index], latch_semantic[index], fine_raw[index], fine_conf[index],
-                previous_hold_fine[index], majority_fine[index],
+                previous_hold_fine[index], majority_fine[index], latch_fine[index],
             ])
 
     args.output_summary.write_text(json.dumps(summary, indent=2), encoding="utf-8")

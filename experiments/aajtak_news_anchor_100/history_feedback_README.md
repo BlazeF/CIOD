@@ -1,8 +1,8 @@
 # Causal history-feedback experiment (MobileNet)
 
-Compares independent MobileNet predictions with causal sequence rules. For frame i, adjustments use only frames before i. Methods: previous-frame hold; five-frame prior majority vote; and News confidence latch (two preceding News predictions >=0.70 to enter News; three preceding non-News predictions >=0.80 to exit). Fine labels also include a five-prior-frame majority vote.
+Compares saved model predictions with causal sequence rules. For frame i, adjustments use only frames before i. Methods include previous-frame hold, prior-window majority vote, and a configurable target-label confidence latch. Defaults target semantic `News` and fine `News Channel-News`; for example, pass `--semantic-target Sports --fine-target Cricket-Sports` for a cricket clip. The latch enters after two consecutive prior target predictions at or above 0.70 confidence and exits after three consecutive prior predictions of the same other class at or above 0.80.
 
-No human frame labels were created, so stability and class counts do not establish accuracy. Tune thresholds only on labeled validation clips to avoid choosing a rule that merely forces News.
+Video-level labels do not establish frame-level accuracy. Stability and class counts are not accuracy metrics without frame-level annotations. Tune thresholds on labeled validation clips to avoid choosing a rule that merely forces the target class.
 
 See `history_feedback_comparison.csv` and `history_feedback_summary.json`.
 
