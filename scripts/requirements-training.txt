@@ -1,0 +1,9 @@
+torch>=2.8
+torchvision>=0.23
+timm>=1.0
+safetensors>=0.8
+numpy>=2.0,<2.2
+Pillow>=10
+tensorflow>=2.19,<2.20
+onnx>=1.19
+onnx2tf>=1.28
